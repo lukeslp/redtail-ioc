@@ -59,7 +59,8 @@ else ok "none (ignoring the benign .dockerenv/.autorelabel)"; fi
 
 say "4. Process disguises"
 # root php-fpm master is normal; match a root 'pool' worker by argv (comm is truncated).
-if ps -eo user=,args= 2>/dev/null | awk '$1=="root" && index($0,"php-fpm: pool")>0{f=1} END{exit f?0:1}'; then
+# [p]hp-fpm bracket trick so this grep can't match its own command line under sudo.
+if ps -eo user=,args= 2>/dev/null | grep -Eq '^root[[:space:]].*[p]hp-fpm: pool'; then
   flag "a ROOT-owned 'php-fpm: pool' worker exists (real pool workers run as www-data)"
 else ok "no root-owned php-fpm pool impostor"; fi
 # need comm and args together; pgrep can't do that.
@@ -87,11 +88,18 @@ imm=$(lsattr /etc/cron.hourly/* /etc/cron.d/* 2>/dev/null | awk '$1 ~ /i/{print}
 [ -n "$imm" ] && flag "immutable (+i) cron files: $imm"
 
 say "6. Miner config strings in the usual spots"
-if grep -rslI --exclude=iocs.txt --exclude=check-my-box.sh --exclude=README.md \
-     -e 'moneroocean' -e 'stratum+tcp' -e '--coin=monero' -e 'gulf.moneroocean.stream' \
-     /etc /root 2>/dev/null | grep -qv "^$selfdir"; then
-  flag "miner strings found under /etc or /root - inspect the matching files"
-else ok "no miner strings in /etc or /root (repo's own iocs excluded; binaries not scanned)"; fi
+# Exclude shell history (your own IR commands land here) and security-tool rule
+# dirs (nuclei/yara templates are full of miner strings by design), plus this repo.
+m6=$(grep -rslI \
+       --exclude='*_history' \
+       --exclude-dir=nuclei-templates --exclude-dir=yara --exclude-dir=.git \
+       --exclude=iocs.txt --exclude=check-my-box.sh --exclude=README.md \
+       -e 'moneroocean' -e 'stratum+tcp' -e '--coin=monero' -e 'gulf.moneroocean.stream' \
+       /etc /root 2>/dev/null | grep -v "^$selfdir")
+if [ -n "$m6" ]; then
+  flag "miner strings under /etc or /root - could be real, could be more of your own notes; eyeball them:"
+  printf '%s\n' "$m6" | sed 's/^/        /'
+else ok "no miner strings in /etc or /root (history, scanner rules, and repo excluded; binaries not scanned)"; fi
 
 say "7. Root crontab for @reboot droppers (RedTail reinstall)"
 c7=0
@@ -141,5 +149,5 @@ printf '\n----------------------------------------\n'
 if [ "$hits" -eq 0 ]; then
   printf 'No hits on the named indicators. Reassuring, not conclusive.\n'
 else
-  printf '%d flag(s). On the box this came from, cleaning did not hold and I ended up\nrebuilding and rotating creds. You know your setup better than this script does.\n' "$hits"
+  printf '%d flag(s). Eyeball each before you trust it: your own IR history and scanner\nrules trip check 6, and check 4 catches transients. A real hit while an intruder\nstill has access means cleaning will not hold until you cut that access first.\n' "$hits"
 fi
