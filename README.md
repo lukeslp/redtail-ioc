@@ -27,7 +27,7 @@ A clean run isn't proof you're safe, and a hit isn't proof you're owned. Both me
 
 ## The short version of how it got in
 
-Password SSH with root login on, brute-forced, then DirtyFrag to root. If that's your box too, turn off password auth and use keys.
+Password SSH with root login on, brute-forced, then DirtyFrag to root. That one was my own fault for leaving it open. Same setup on your box? Keys-only SSH closes it.
 
 ## License
 

@@ -1,18 +1,13 @@
 #!/usr/bin/env bash
-# check-my-box.sh - quick triage for the RedTail / XorDDoS / MoneroOcean pattern
-# described at lukesteuber.com/writing/redtail-compromise
-#
-# Read-only. It changes nothing. Run as root (or with sudo) for full coverage;
-# checks that need root (sshd -T, root crontab, /etc/shadow, socket owners) say
-# so when they cannot read. A hit is not proof of compromise, and a clean run is
-# not proof of safety. It checks the specific tells from one real incident.
-#
-# Public-domain (CC0). By Luke Steuber.
+# check-my-box.sh - my triage notes from one box that got popped: RedTail /
+# XorDDoS / MoneroOcean. Writeup: lukesteuber.com/writing/redtail-compromise
+# Read-only; run as root for the checks that need it. Looks for the tells from
+# that one incident, nothing cleverer. CC0, Luke Steuber.
 
 set -u
 hits=0
 selfdir=$(cd "$(dirname "$0")" 2>/dev/null && pwd || echo /nonexistent)
-# Known-bad SHA-256s from iocs.txt, to confirm a found artifact is the real sample.
+# Known-bad hashes from iocs.txt.
 known_hashes="59c29436755b0778e968d49feeae20ed65f5fa5e35f9f7965b8ed93420db91e5
 74d31cac40d98ee64df2a0c29ceb229d12ac5fa699c2ee512fc69360f0cf68c5
 9b7754d6b7067e511dce1bd9d3e16f5eac2fd3f16098ae9e4f29b59831d739cd
@@ -25,13 +20,12 @@ flag() { printf '  [!] %s\n' "$1"; hits=$((hits+1)); }
 ok()   { printf '  [ok] %s\n' "$1"; }
 warn() { printf '  [?] %s\n' "$1"; }
 
-# Hash a found file and report whether it matches a known-bad sample.
 confirm_hash() {
   command -v sha256sum >/dev/null 2>&1 || return 0
   local h; h=$(sha256sum "$1" 2>/dev/null | awk '{print $1}')
   [ -n "$h" ] || return 0
   if printf '%s\n' "$known_hashes" | grep -qi "^$h$"; then
-    flag "  ^ sha256 MATCHES a known incident sample ($h)"
+    flag "  ^ sha256 matches a known incident sample ($h)"
   fi
 }
 
@@ -41,10 +35,10 @@ if [ -z "$eff" ]; then
   warn "could not read effective sshd config (run as root: sudo $0). SSH checks skipped."
 else
   if printf '%s\n' "$eff" | grep -qi '^passwordauthentication yes'; then
-    flag "PasswordAuthentication is ON - brute-forceable. Turn it off, use keys."
+    flag "PasswordAuthentication is on (brute-forceable)"
   else ok "password auth disabled"; fi
   if printf '%s\n' "$eff" | grep -qiE '^permitrootlogin (yes|without-password|prohibit-password)'; then
-    flag "PermitRootLogin allows root over SSH. Set it to 'no'."
+    flag "PermitRootLogin allows root over SSH"
   else ok "root SSH login not enabled"; fi
 fi
 
@@ -60,17 +54,15 @@ found=$(find / -maxdepth 1 -name '.*' ! -name '.' ! -name '..' \
           ! -name '.dockerenv' ! -name '.autorelabel' \( -type f -o -type l -o -type d \) 2>/dev/null)
 if [ -n "$found" ]; then
   flag "hidden entries at /: $(echo "$found" | tr '\n' ' ')"
-  for hf in $found; do [ -f "$hf" ] && confirm_hash "$hf"; done
+  while IFS= read -r hf; do [ -n "$hf" ] && [ -f "$hf" ] && confirm_hash "$hf"; done < <(printf '%s\n' "$found")
 else ok "none (ignoring the benign .dockerenv/.autorelabel)"; fi
 
 say "4. Process disguises"
-# RedTail fakes the process title 'php-fpm: pool www' but runs as ROOT. The real
-# php-fpm MASTER is root too (normal), so match a root WORKER title ('pool') via
-# argv, not the truncated comm, to avoid flagging a normal LAMP box.
+# root php-fpm master is normal; match a root 'pool' worker by argv (comm is truncated).
 if ps -eo user=,args= 2>/dev/null | awk '$1=="root" && index($0,"php-fpm: pool")>0{f=1} END{exit f?0:1}'; then
   flag "a ROOT-owned 'php-fpm: pool' worker exists (real pool workers run as www-data)"
 else ok "no root-owned php-fpm pool impostor"; fi
-# ps|grep (not pgrep): need a process whose title fakes [kworker] AND has miner args.
+# need comm and args together; pgrep can't do that.
 # shellcheck disable=SC2009
 if ps -eo comm=,args= 2>/dev/null | grep -E '\[kworker' | grep -qiE 'stratum|moneroocean|xmrig|--coin|\.stream'; then
   flag "a process masquerading as [kworker] has miner arguments"
@@ -90,16 +82,16 @@ for p in /etc/cron.hourly/gcc.sh \
   if [ -e "$p" ]; then flag "present: $p"; p5=1; confirm_hash "$p"; fi
 done
 [ "$p5" -eq 0 ] && ok "none of the named artifacts present"
-# XorDDoS/RedTail often set +i (immutable) on their cron files to resist deletion.
-imm=$(lsattr /etc/cron.hourly/* /etc/cron.d/* 2>/dev/null | grep -- '-i-' || true)
-[ -n "$imm" ] && flag "immutable (+i) cron files - a common malware anti-removal tell: $imm"
+# Malware sometimes sets +i on its cron files to resist deletion.
+imm=$(lsattr /etc/cron.hourly/* /etc/cron.d/* 2>/dev/null | awk '$1 ~ /i/{print}')
+[ -n "$imm" ] && flag "immutable (+i) cron files: $imm"
 
 say "6. Miner config strings in the usual spots"
 if grep -rslI --exclude=iocs.txt --exclude=check-my-box.sh --exclude=README.md \
      -e 'moneroocean' -e 'stratum+tcp' -e '--coin=monero' -e 'gulf.moneroocean.stream' \
      /etc /root 2>/dev/null | grep -qv "^$selfdir"; then
   flag "miner strings found under /etc or /root - inspect the matching files"
-else ok "no miner strings in /etc or /root (repo's own iocs excluded; note: binaries not scanned)"; fi
+else ok "no miner strings in /etc or /root (repo's own iocs excluded; binaries not scanned)"; fi
 
 say "7. Root crontab for @reboot droppers (RedTail reinstall)"
 c7=0
@@ -118,7 +110,7 @@ say "9. Network: live connections to the incident's C2 / mining infrastructure"
 if command -v ss >/dev/null 2>&1; then
   conns=$(ss -tnp 2>/dev/null || ss -tn 2>/dev/null)
   n9=0
-  for ioc in 130.12.180.51 45.148.10.68 91.142.79.135 :10256 gulf.moneroocean.stream; do
+  for ioc in 130.12.180.51 45.148.10.68 91.142.79.135 :10256; do
     printf '%s\n' "$conns" | grep -qF "$ioc" && { flag "active connection involving $ioc"; n9=1; }
   done
   # Real kworkers are kernel threads with no sockets; one owning a TCP socket is a miner.
@@ -130,12 +122,11 @@ say "10. Passwordless / duplicate root (DirtyFrag empties root's passwd field)"
 if awk -F: '$3==0 && $1!="root"{print $1}' /etc/passwd | grep -q .; then
   flag "a non-root account has UID 0: $(awk -F: '$3==0 && $1!="root"{print $1}' /etc/passwd | tr '\n' ' ')"
 else ok "root is the only UID 0"; fi
-# DirtyFrag PoC patches /etc/passwd directly (root::0:0...); on shadow systems an
-# empty root password otherwise lives in /etc/shadow. Check both.
+# DirtyFrag empties root's passwd field; on shadow systems check /etc/shadow too.
 if grep -q '^root::' /etc/passwd; then flag "root has an EMPTY password field in /etc/passwd"; else ok "root passwd field intact"; fi
 if [ -r /etc/shadow ]; then
   if grep -q '^root::' /etc/shadow; then flag "root has an EMPTY password in /etc/shadow"; else ok "root shadow entry intact"; fi
-else warn "/etc/shadow not readable (run as root to check for an empty root password there)"; fi
+else warn "/etc/shadow not readable (run as root to check it too)"; fi
 
 say "11. authorized_keys mtime vs. last logins (re-planted keys)"
 for k in /root/.ssh/authorized_keys /root/.ssh/authorized_keys2 /home/*/.ssh/authorized_keys /home/*/.ssh/authorized_keys2; do
@@ -150,5 +141,5 @@ printf '\n----------------------------------------\n'
 if [ "$hits" -eq 0 ]; then
   printf 'No hits on the named indicators. Reassuring, not conclusive.\n'
 else
-  printf '%d flag(s). Do not clean-and-trust. If any layer is real, plan a rebuild\nfrom a known-good image and rotate every credential the host has touched.\n' "$hits"
+  printf '%d flag(s). On the box this came from, cleaning did not hold and I ended up\nrebuilding and rotating creds. You know your setup better than this script does.\n' "$hits"
 fi
