@@ -1,0 +1,53 @@
+# Indicators of Compromise: RedTail / XorDDoS / MoneroOcean on a Linux host
+# Incident date: 2026-07-07  Host: dreamer (65.181.112.75)
+# Compiled by Luke Steuber. Public-domain; reuse freely.
+# Malware binaries are NOT distributed here. Pull samples from ThreatFox by hash.
+
+## SHA-256 hashes
+59c29436755b0778e968d49feeae20ed65f5fa5e35f9f7965b8ed93420db91e5  RedTail miner payload (dropped as /.<random> and /.opOkp1zZeX7cA)
+74d31cac40d98ee64df2a0c29ceb229d12ac5fa699c2ee512fc69360f0cf68c5  /etc/cron.hourly/gcc.sh  (XorDDoS dropper)
+9b7754d6b7067e511dce1bd9d3e16f5eac2fd3f16098ae9e4f29b59831d739cd  /etc/init.d/mziqfzmynp
+71a260ff9983861a20cd82ab3c11786062cecccc259dd655d6e5ec8c662bd93b  /usr/bin/mziqfzmynp
+fe06ffa4ef7b99653a7affe15c27f0687cb21320e5651ec76cc90f2aadd83ce0  /usr/lib/libudev.so (variant A)
+5a98b6905571d0b5d8e4ff06877601006c3c84e01e86596405d4b5217b67af9d  /usr/lib/libudev.so (variant B)
+
+## Attacker / C2 IPs
+130.12.180.51    RedTail delivery + C2; successful root password login; hosts.allow allowlist target  (Netiface / Virtualine; abuse@virtualine.org)
+45.148.10.68     RedTail outbound on :21370  (TECHOFF SRV / DMZHOST; dmzhostabuse@gmail.com)
+91.142.79.135    multiple successful root password logins during cleanup  (MACLOUD RU; abuse@macloud.ru)
+14.103.118.190   SSH preauth during cleanup  (Beijing Volcano Engine / ByteDance)
+36.110.172.218   SSH brute force  (CHINANET Beijing)
+197.225.146.23   SSH brute force  (Mauritius Telecom)
+45.164.39.253    SSH brute force  (AS268622 Brazil)
+202.70.78.237    SSH brute force  (Nepal Telecom)
+
+## Monero mining
+pool:   gulf.moneroocean.stream:10256
+wallet: 48JfxTN2pmPeVXGrHQW2X45XyFPvGLvohjU6SBDnh6XKWX6KcbzXuwPim31npkBxykUQBjosdAF9XXL5JauKePP8CmnvREV
+worker: dreamer   (the miner names the worker after the victim hostname)
+
+## Filesystem artifacts
+/home/coolhand/1                                   DirtyFrag local-privilege-escalation binary
+/.51qiA7BTDvFwSsYV5pT5e2LKKZKuw                     RedTail payload (hidden, filesystem root)
+/.NvxZIO2CyuceFUOMrFNYVG4APoyYea                    RedTail payload
+/.UA4rkagbuPbxLC                                    RedTail payload
+/.opOkp1zZeX7cA                                     RedTail payload
+/etc/cron.hourly/gcc.sh                             XorDDoS dropper
+/lib/libudev.so  /lib/libudev.so.6  /usr/lib/libudev.so   XorDDoS payload
+/usr/bin/mziqfzmynp  /etc/init.d/mziqfzmynp         XorDDoS persistence
+/usr/bin/zjkuqmfgib  /etc/init.d/zjkuqmfgib         XorDDoS persistence
+/etc/systemd/system/systemd-resolvd.service         fake miner service
+/etc/systemd/system/systemd-resolvd-watchdog.service / .timer
+/etc/cron.d/systemd-resolvd                          fake miner cron
+/usr/lib/systemd/systemd-resolver                    the XMRig miner binary (fake name)
+
+## Process disguises to watch for
+"php-fpm: pool www"   but ROOT-owned  (real php-fpm pool workers run as www-data)
+"[kworker/0:2]"       but a userland process with an outbound stratum connection
+
+## Lockout mechanism (TCP wrappers)
+/etc/hosts.allow  ->  sshd: 130.12.180.51
+/etc/hosts.deny   ->  sshd: ALL
+
+## Relevant CVEs (DirtyFrag LPE family)
+CVE-2026-43284, CVE-2026-43500  (Linux kernel ESP / rxrpc local privilege escalation)
