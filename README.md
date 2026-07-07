@@ -2,7 +2,9 @@
 
 Indicators of compromise and a triage script from a Linux server I run that got popped in July 2026. This was not an elite failure. It was a basic mistake, owned in public because shame is more useful when it comes with logs.
 
-I made a stupid mistake, but fulfilled my lifetime goal of dual wielding LLMs against root. Fable missed it; a frontier model missed it; Codex found the live compromise. The useful part is below: IOCs, timestamps, and a read-only checklist for people smarter than me, plus people who are about to become smarter the same unpleasant way.
+I made a stupid mistake, but fulfilled my lifetime goal of dual wielding LLMs against root.
+
+Fable missed it. A frontier model missed it. Codex found the live compromise. The useful part is below: IOCs, timestamps, and a read-only checklist for people smarter than me, plus people who are about to become smarter the same unpleasant way.
 
 Four things were stacked on the box:
 
