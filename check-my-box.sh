@@ -2,69 +2,149 @@
 # check-my-box.sh - quick triage for the RedTail / XorDDoS / MoneroOcean pattern
 # described at lukesteuber.com/writing/redtail-compromise
 #
-# Read-only. It changes nothing. Run as root (or with sudo) for full coverage.
-# A hit is not proof of compromise, and a clean run is not proof of safety.
-# It checks the specific tells from one real incident, nothing more.
+# Read-only. It changes nothing. Run as root (or with sudo) for full coverage;
+# checks that need root (sshd -T, root crontab, /etc/shadow, socket owners) say
+# so when they cannot read. A hit is not proof of compromise, and a clean run is
+# not proof of safety. It checks the specific tells from one real incident.
 #
-# Public-domain. By Luke Steuber.
+# Public-domain (CC0). By Luke Steuber.
 
 set -u
 hits=0
+selfdir=$(cd "$(dirname "$0")" 2>/dev/null && pwd || echo /nonexistent)
+# Known-bad SHA-256s from iocs.txt, to confirm a found artifact is the real sample.
+known_hashes="59c29436755b0778e968d49feeae20ed65f5fa5e35f9f7965b8ed93420db91e5
+74d31cac40d98ee64df2a0c29ceb229d12ac5fa699c2ee512fc69360f0cf68c5
+9b7754d6b7067e511dce1bd9d3e16f5eac2fd3f16098ae9e4f29b59831d739cd
+71a260ff9983861a20cd82ab3c11786062cecccc259dd655d6e5ec8c662bd93b
+fe06ffa4ef7b99653a7affe15c27f0687cb21320e5651ec76cc90f2aadd83ce0
+5a98b6905571d0b5d8e4ff06877601006c3c84e01e86596405d4b5217b67af9d"
+
 say()  { printf '\n=== %s ===\n' "$1"; }
 flag() { printf '  [!] %s\n' "$1"; hits=$((hits+1)); }
 ok()   { printf '  [ok] %s\n' "$1"; }
+warn() { printf '  [?] %s\n' "$1"; }
+
+# Hash a found file and report whether it matches a known-bad sample.
+confirm_hash() {
+  command -v sha256sum >/dev/null 2>&1 || return 0
+  local h; h=$(sha256sum "$1" 2>/dev/null | awk '{print $1}')
+  [ -n "$h" ] || return 0
+  if printf '%s\n' "$known_hashes" | grep -qi "^$h$"; then
+    flag "  ^ sha256 MATCHES a known incident sample ($h)"
+  fi
+}
 
 say "1. SSH exposure (the usual front door)"
-eff=$(sshd -T 2>/dev/null)
-if echo "$eff" | grep -qi '^passwordauthentication yes'; then
-  flag "PasswordAuthentication is ON - brute-forceable. Turn it off, use keys."
-else ok "password auth disabled"; fi
-if echo "$eff" | grep -qi '^permitrootlogin yes'; then
-  flag "PermitRootLogin yes - direct root over SSH. Set to 'no'."
-else ok "root SSH not wide open"; fi
+eff=$(sshd -T 2>/dev/null || /usr/sbin/sshd -T 2>/dev/null)
+if [ -z "$eff" ]; then
+  warn "could not read effective sshd config (run as root: sudo $0). SSH checks skipped."
+else
+  if printf '%s\n' "$eff" | grep -qi '^passwordauthentication yes'; then
+    flag "PasswordAuthentication is ON - brute-forceable. Turn it off, use keys."
+  else ok "password auth disabled"; fi
+  if printf '%s\n' "$eff" | grep -qiE '^permitrootlogin (yes|without-password|prohibit-password)'; then
+    flag "PermitRootLogin allows root over SSH. Set it to 'no'."
+  else ok "root SSH login not enabled"; fi
+fi
 
 say "2. TCP-wrapper lockout (how the attacker kept SSH to themselves)"
 for f in /etc/hosts.allow /etc/hosts.deny; do
-  if [ -s "$f" ] && grep -qiv '^\s*#' "$f" 2>/dev/null && grep -qi 'sshd' "$f"; then
-    flag "$f has an sshd rule: $(grep -i sshd "$f" | tr '\n' ' ')"
+  if [ -s "$f" ] && grep -Eiq '^[^#]*sshd' "$f" 2>/dev/null; then
+    flag "$f has an sshd rule: $(grep -Ei '^[^#]*sshd' "$f" | tr '\n' ' ')"
   else ok "$f has no surprise sshd rule"; fi
 done
 
-say "3. Root-owned files at the filesystem root (RedTail drop pattern)"
-found=$(find / -maxdepth 1 -name '.??*' -type f 2>/dev/null)
-if [ -n "$found" ]; then flag "hidden files at /: $found"; else ok "none"; fi
+say "3. Hidden files at the filesystem root (RedTail drop pattern)"
+found=$(find / -maxdepth 1 -name '.*' ! -name '.' ! -name '..' \
+          ! -name '.dockerenv' ! -name '.autorelabel' \( -type f -o -type l -o -type d \) 2>/dev/null)
+if [ -n "$found" ]; then
+  flag "hidden entries at /: $(echo "$found" | tr '\n' ' ')"
+  for hf in $found; do [ -f "$hf" ] && confirm_hash "$hf"; done
+else ok "none (ignoring the benign .dockerenv/.autorelabel)"; fi
 
 say "4. Process disguises"
-if ps -eo user,comm 2>/dev/null | grep -E 'php-fpm' | grep -qw root; then
-  flag "a ROOT-owned php-fpm process exists (real pool workers are www-data)"
-else ok "no root-owned php-fpm impostor"; fi
-if ps -eo comm,args 2>/dev/null | grep -E '\[kworker' | grep -qiE 'stratum|moneroocean|xmrig|--coin'; then
+# RedTail fakes the process title 'php-fpm: pool www' but runs as ROOT. The real
+# php-fpm MASTER is root too (normal), so match a root WORKER title ('pool') via
+# argv, not the truncated comm, to avoid flagging a normal LAMP box.
+if ps -eo user=,args= 2>/dev/null | awk '$1=="root" && index($0,"php-fpm: pool")>0{f=1} END{exit f?0:1}'; then
+  flag "a ROOT-owned 'php-fpm: pool' worker exists (real pool workers run as www-data)"
+else ok "no root-owned php-fpm pool impostor"; fi
+# ps|grep (not pgrep): need a process whose title fakes [kworker] AND has miner args.
+# shellcheck disable=SC2009
+if ps -eo comm=,args= 2>/dev/null | grep -E '\[kworker' | grep -qiE 'stratum|moneroocean|xmrig|--coin|\.stream'; then
   flag "a process masquerading as [kworker] has miner arguments"
-else ok "no kworker-masked miner"; fi
+else ok "no kworker-masked miner (see check 9 for the socket tell)"; fi
 
-say "5. Known persistence spots"
-for p in /etc/cron.hourly/gcc.sh /lib/libudev.so.6 /usr/bin/mziqfzmynp /usr/bin/zjkuqmfgib \
-         /etc/systemd/system/systemd-resolvd.service /usr/lib/systemd/systemd-resolver; do
-  [ -e "$p" ] && flag "present: $p"
+say "5. Known persistence artifacts"
+p5=0
+for p in /etc/cron.hourly/gcc.sh \
+         /lib/libudev.so /lib/libudev.so.6 /usr/lib/libudev.so \
+         /usr/bin/mziqfzmynp /etc/init.d/mziqfzmynp \
+         /usr/bin/zjkuqmfgib /etc/init.d/zjkuqmfgib \
+         /etc/systemd/system/systemd-resolvd.service \
+         /etc/systemd/system/systemd-resolvd-watchdog.service \
+         /etc/systemd/system/systemd-resolvd-watchdog.timer \
+         /etc/cron.d/systemd-resolvd \
+         /usr/lib/systemd/systemd-resolver; do
+  if [ -e "$p" ]; then flag "present: $p"; p5=1; confirm_hash "$p"; fi
 done
-[ "$hits" -eq 0 ] && ok "none of the named artifacts present"
+[ "$p5" -eq 0 ] && ok "none of the named artifacts present"
+# XorDDoS/RedTail often set +i (immutable) on their cron files to resist deletion.
+imm=$(lsattr /etc/cron.hourly/* /etc/cron.d/* 2>/dev/null | grep -- '-i-' || true)
+[ -n "$imm" ] && flag "immutable (+i) cron files - a common malware anti-removal tell: $imm"
 
-say "6. Miner config strings anywhere in the usual spots"
-if grep -rlsI 'moneroocean\|stratum+tcp\|--coin=monero' /etc /root 2>/dev/null | grep -q .; then
+say "6. Miner config strings in the usual spots"
+if grep -rslI --exclude=iocs.txt --exclude=check-my-box.sh --exclude=README.md \
+     -e 'moneroocean' -e 'stratum+tcp' -e '--coin=monero' -e 'gulf.moneroocean.stream' \
+     /etc /root 2>/dev/null | grep -qv "^$selfdir"; then
   flag "miner strings found under /etc or /root - inspect the matching files"
-else ok "no miner strings in /etc or /root"; fi
+else ok "no miner strings in /etc or /root (repo's own iocs excluded; note: binaries not scanned)"; fi
 
-say "7. /etc/passwd sanity (DirtyFrag empties root's passwd field)"
-if awk -F: '$3==0 && $1!="root"{print}' /etc/passwd | grep -q .; then
-  flag "a non-root account has UID 0: $(awk -F: '$3==0 && $1!="root"{print $1}' /etc/passwd)"
-else ok "root is the only UID 0"; fi
-if grep -q '^root::' /etc/passwd; then flag "root has an EMPTY password field in /etc/passwd"; else ok "root passwd field intact"; fi
-
-say "8. authorized_keys mtime vs. last logins (re-planted keys)"
-for k in /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys; do
-  [ -e "$k" ] && printf '  %s  last modified: %s\n' "$k" "$(stat -c %y "$k" 2>/dev/null)"
+say "7. Root crontab for @reboot droppers (RedTail reinstall)"
+c7=0
+crontab -l 2>/dev/null | grep -vE '^[[:space:]]*#' | grep -qE '@reboot[[:space:]]+/\.' && c7=1
+for cf in /var/spool/cron/crontabs/root /var/spool/cron/root; do
+  [ -r "$cf" ] && grep -qE '@reboot[[:space:]]+/\.' "$cf" 2>/dev/null && c7=1
 done
-printf '  (compare those times against: last -i | head)\n'
+if [ "$c7" -eq 1 ]; then flag "a crontab has an @reboot entry pointing at a hidden root path"; else ok "no @reboot hidden-path cron entry"; fi
+
+say "8. LD_PRELOAD rootkit (/etc/ld.so.preload)"
+if [ -s /etc/ld.so.preload ]; then
+  flag "/etc/ld.so.preload is present and non-empty: $(tr '\n' ' ' </etc/ld.so.preload)"
+else ok "no ld.so.preload"; fi
+
+say "9. Network: live connections to the incident's C2 / mining infrastructure"
+if command -v ss >/dev/null 2>&1; then
+  conns=$(ss -tnp 2>/dev/null || ss -tn 2>/dev/null)
+  n9=0
+  for ioc in 130.12.180.51 45.148.10.68 91.142.79.135 :10256 gulf.moneroocean.stream; do
+    printf '%s\n' "$conns" | grep -qF "$ioc" && { flag "active connection involving $ioc"; n9=1; }
+  done
+  # Real kworkers are kernel threads with no sockets; one owning a TCP socket is a miner.
+  printf '%s\n' "$conns" | grep -qi 'kworker' && { flag "a process named [kworker] owns a TCP socket (kernel threads never do)"; n9=1; }
+  [ "$n9" -eq 0 ] && ok "no connections to the named C2 IPs, pool port, or kworker-owned sockets"
+else warn "ss not available; skipped network check"; fi
+
+say "10. Passwordless / duplicate root (DirtyFrag empties root's passwd field)"
+if awk -F: '$3==0 && $1!="root"{print $1}' /etc/passwd | grep -q .; then
+  flag "a non-root account has UID 0: $(awk -F: '$3==0 && $1!="root"{print $1}' /etc/passwd | tr '\n' ' ')"
+else ok "root is the only UID 0"; fi
+# DirtyFrag PoC patches /etc/passwd directly (root::0:0...); on shadow systems an
+# empty root password otherwise lives in /etc/shadow. Check both.
+if grep -q '^root::' /etc/passwd; then flag "root has an EMPTY password field in /etc/passwd"; else ok "root passwd field intact"; fi
+if [ -r /etc/shadow ]; then
+  if grep -q '^root::' /etc/shadow; then flag "root has an EMPTY password in /etc/shadow"; else ok "root shadow entry intact"; fi
+else warn "/etc/shadow not readable (run as root to check for an empty root password there)"; fi
+
+say "11. authorized_keys mtime vs. last logins (re-planted keys)"
+for k in /root/.ssh/authorized_keys /root/.ssh/authorized_keys2 /home/*/.ssh/authorized_keys /home/*/.ssh/authorized_keys2; do
+  [ -e "$k" ] && printf '  %s  modified: %s\n' "$k" "$(stat -c %y "$k" 2>/dev/null || stat -f %Sm "$k" 2>/dev/null)"
+done
+if command -v last >/dev/null 2>&1; then
+  printf '  recent logins (compare against the key times above):\n'
+  last -i 2>/dev/null | head -5 | sed 's/^/    /'
+fi
 
 printf '\n----------------------------------------\n'
 if [ "$hits" -eq 0 ]; then
