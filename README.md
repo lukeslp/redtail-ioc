@@ -1,6 +1,10 @@
 # redtail-ioc
 
-Indicators of compromise and a triage script from a Linux server I run that got popped in July 2026. Four things were stacked on it:
+Indicators of compromise and a triage script from a Linux server I run that got popped in July 2026. This was not an elite failure. It was a basic mistake, owned in public because shame is more useful when it comes with logs.
+
+I made a stupid mistake, but fulfilled my lifetime goal of dual wielding LLMs against root. Fable missed it; a frontier model missed it; Codex found the live compromise. The useful part is below: IOCs, timestamps, and a read-only checklist for people smarter than me, plus people who are about to become smarter the same unpleasant way.
+
+Four things were stacked on the box:
 
 - **RedTail** cryptominer, hiding as a root-owned `php-fpm: pool www`
 - **XorDDoS**-style persistence (`/etc/cron.hourly/gcc.sh`, `libudev.so`, fake services)
@@ -27,7 +31,7 @@ A clean run isn't proof you're safe, and a hit isn't proof you're owned. Both me
 
 ## The short version of how it got in
 
-Password SSH with root login on, brute-forced, then DirtyFrag to root. That one was my own fault for leaving it open. Same setup on your box? Keys-only SSH closes it.
+Password SSH and root login were enabled. Evidence points to brute-force access, then DirtyFrag to root. That exposure was my own fault. If you find the same setup on a box you own, treat it as urgent: disable password auth and root SSH, rotate credentials, and verify from logs rather than from memory.
 
 ## License
 
