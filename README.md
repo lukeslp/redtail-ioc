@@ -1,51 +1,40 @@
 # redtail-ioc
 
-Indicators of compromise and a read-only triage script from a real Linux root compromise (July 2026). The host stacked four things:
+Indicators of compromise and a triage script from a Linux server I run that got popped in July 2026. Four things were stacked on it:
 
-- **RedTail** cryptominer (disguised as a root-owned `php-fpm: pool www`)
-- **XorDDoS**-style persistence (`/etc/cron.hourly/gcc.sh`, `libudev.so`, fake init.d/systemd services)
-- **MoneroOcean** miner (fake `systemd-resolvd` service, process title `[kworker/0:2]`)
-- **DirtyFrag** local privilege escalation (CVE-2026-43284 / CVE-2026-43500)
+- **RedTail** cryptominer, hiding as a root-owned `php-fpm: pool www`
+- **XorDDoS**-style persistence (`/etc/cron.hourly/gcc.sh`, `libudev.so`, fake services)
+- **MoneroOcean** miner, running as a fake `systemd-resolvd` with the process title `[kworker/0:2]`
+- **DirtyFrag** kernel privilege escalation (CVE-2026-43284 / CVE-2026-43500)
 
-Full writeup, timeline, and detection notes: **https://lukesteuber.com/writing/redtail-compromise/**
+The full writeup, with the timeline and how I found each piece, is at **[lukesteuber.com/writing/redtail-compromise](https://lukesteuber.com/writing/redtail-compromise/)**.
+
+I put the indicators here because when you're triaging your own box, you grep GitHub for a hash or an IP. Maybe these save you an hour.
 
 ## Files
 
-| File | What it is |
-|------|-----------|
-| [`iocs.txt`](iocs.txt) | Hashes, C2 IPs with abuse contacts, Monero pool + wallet, filesystem artifacts, process disguises, relevant CVEs |
-| [`check-my-box.sh`](check-my-box.sh) | Read-only triage script. Checks the specific tells from this incident. Changes nothing. |
+- **[`iocs.txt`](iocs.txt)**: hashes, C2 IPs with abuse contacts, the Monero pool and wallet, filesystem artifacts, process disguises, CVEs.
+- **[`check-my-box.sh`](check-my-box.sh)**: read-only triage. Checks the specific tells from this incident and changes nothing.
 
-## Using the checklist
+## Run the checklist
 
 ```sh
 curl -O https://raw.githubusercontent.com/lukeslp/redtail-ioc/main/check-my-box.sh
 sudo bash check-my-box.sh
 ```
 
-It checks SSH exposure, the `hosts.allow`/`hosts.deny` lockout, root-owned impostor processes, the known persistence paths, miner strings, an emptied root password field, and `authorized_keys` timestamps. A clean run is not proof of safety and a hit is not proof of compromise. Both are reasons to look closer.
+A clean run isn't proof you're safe, and a hit isn't proof you're owned. Both mean look closer.
 
-## Key indicators
+## The short version of how it got in
 
-```
-SHA-256  59c29436755b0778e968d49feeae20ed65f5fa5e35f9f7965b8ed93420db91e5   RedTail payload
-IP       130.12.180.51    RedTail C2 + root login + hosts.allow allowlist target
-IP       45.148.10.68     RedTail outbound :21370
-IP       91.142.79.135    root password logins during cleanup
-Pool     gulf.moneroocean.stream:10256
-Wallet   48JfxTN2pmPeVXGrHQW2X45XyFPvGLvohjU6SBDnh6XKWX6KcbzXuwPim31npkBxykUQBjosdAF9XXL5JauKePP8CmnvREV
-```
-
-Full list in [`iocs.txt`](iocs.txt).
-
-## Entry point
-
-Password SSH with root login enabled (`PermitRootLogin yes` + `PasswordAuthentication yes`), brute-forced, then DirtyFrag to root. If that describes your box, turn off password auth and use keys.
-
-## Contributing
-
-Corrections, additional indicators for the same families, or detection improvements are welcome. Open an issue or a PR. Fork it and adapt the checklist for your own environment.
+Password SSH with root login on, brute-forced, then DirtyFrag to root. If that's your box too, turn off password auth and use keys.
 
 ## License
 
-Indicators and the checklist are released under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) (public domain). Take them wherever they are useful.
+[CC0](https://creativecommons.org/publicdomain/zero/1.0/). Public domain. Take it, fork it, fold it into your own detections. Corrections and new indicators for these families are welcome as issues or PRs.
+
+## Links
+
+- [GitHub](https://github.com/lukeslp)
+- [Bluesky](https://bsky.app/profile/lukesteuber.com)
+- [Website](https://lukesteuber.com)
