@@ -1,5 +1,5 @@
 # Indicators of Compromise: RedTail / XorDDoS / MoneroOcean on a Linux host
-# Incident date: 2026-07-07  Host: dreamer (65.181.112.75)
+# Incident date: 2026-07-07
 # Compiled by Luke Steuber. Public-domain; reuse freely.
 # Malware binaries are NOT distributed here. Pull samples from ThreatFox by hash.
 
