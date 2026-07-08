@@ -60,6 +60,7 @@ else ok "none (ignoring the benign .dockerenv/.autorelabel)"; fi
 say "4. Process disguises"
 # root php-fpm master is normal; match a root 'pool' worker by argv (comm is truncated).
 # [p]hp-fpm bracket trick so this grep can't match its own command line under sudo.
+# shellcheck disable=SC2009
 if ps -eo user=,args= 2>/dev/null | grep -Eq '^root[[:space:]].*[p]hp-fpm: pool'; then
   flag "a ROOT-owned 'php-fpm: pool' worker exists (real pool workers run as www-data)"
 else ok "no root-owned php-fpm pool impostor"; fi
