@@ -2,8 +2,9 @@
 
 Indicators of compromise and a triage script from a Linux server I run that got popped in July 2026. This was not an elite failure. It was a basic mistake, owned in public because shame is more useful when it comes with logs. 
 
-> I wouldn't have caught this if they didn't make a stupid mistake too (locking me out of ssh, when I may not have otherwise noticed). I know what I'm doing in a handful of ways, but have little experience here. I had to consult the robots. Fable missed it, but Codex 5.5 found the live compromise; once both solutions were evaluated together, there were a few things all three missed (including me).
-> The useful part is below: IOCs, timestamps, and a read-only checklist for people smarter than me. When something like this happens I love when I can find anything online, so here is that.
+I wouldn't have caught this if they didn't make a stupid mistake too (locking me out of ssh, when I may not have otherwise noticed). I know what I'm doing in a handful of ways, but have little experience here. I had to consult the robots. Fable missed it, but Codex 5.5 found the live compromise; once both solutions were evaluated together, there were a few things all three missed (including me).
+
+The useful part is below: IOCs, timestamps, and a read-only checklist for people smarter than me. When something like this happens I love when I can find anything online, so here is that.
 
 For three minutes, I fulfilled my lifetime goal of dual wielding AIs to battle someone with root! 🧙🏻‍♂️ Someone tell twelve year old me*
 
